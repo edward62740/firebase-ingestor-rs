@@ -5,23 +5,23 @@ use coap::Server;
 use coap_lite::{MessageClass, RequestType as Method};
 use firebase_rs::*;
 use local_ip_address::local_ip;
-use std::net::{IpAddr, Ipv4Addr};
+use mdns_sd::{ServiceDaemon};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-
-use std::{env};
-use tokio::{task};
+use std::env;
+use std::net::{IpAddr, Ipv4Addr};
+use tokio::task;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-mod util;
 mod dnssd;
+mod util;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 struct CoapMessage {
     data: HashMap<String, String>,
-    ipv4: String,
-    unix: u64,
+    ipv4: Option<String>,
+    unix: Option<u64>,
 }
 
 #[tokio::main]
@@ -29,42 +29,50 @@ struct CoapMessage {
 async fn main() {
     env_logger::init();
 
-    println!("System time: {:?}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs());
+    let regex_pattern_get = r"^/([^/]+/)*([^/]+)?/$";
+    let regex_pattern_all = r"^/([^/]+/)*[^/]+$";
+
+    println!(
+        "System time: {:?}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    );
     let args: Vec<String> = env::args().collect();
-    
+
+    let mut metadata: bool = true;
+    for arg in args.iter() {
+        match arg.as_str() {
+            "--no_metadata" => {
+                println!("Metadata disabled");
+                metadata = false},
+            _ => {}
+        }
+    }
     let service_type = format!("{}.local.", get_argument(&args, 1));
     let instance_name = get_argument(&args, 2);
     let firebase_url = get_argument(&args, 3);
     let firebase_key = get_argument(&args, 4);
 
-
     let self_ip: Option<Ipv4Addr> = match local_ip().unwrap() {
         IpAddr::V4(ipv4) => Some(ipv4),
         _ => None,
     };
-    
+
     let self_ipv4 = self_ip.expect("No IPv4 address found!");
-    
 
     task::spawn(async move {
-        dnssd::register(self_ipv4, 3456, service_type, instance_name);
+        let mdns: ServiceDaemon = ServiceDaemon::new().expect("Could not create service daemon");
+        dnssd::register(&mdns, self_ipv4, 3456, service_type, instance_name);
     });
 
-    let firebase = Firebase::auth(
-        &firebase_url,
-        &firebase_key,
-    )
-    .unwrap();
-
-    let regex_pattern_get = r"^/([^/]+/)*([^/]+)?/$";
-    let regex_pattern_all = r"^/([^/]+/)*[^/]+$";
-
-    let mut server = Server::new(self_ipv4.to_string() + ":5683").unwrap();
+    let firebase = Firebase::auth(&firebase_url, &firebase_key).unwrap();
+    let mut coap_server = Server::new(self_ipv4.to_string() + ":5683").unwrap();
 
     println!("Server up on {}", self_ipv4);
 
-
-    server
+    coap_server
         .run(|request| async {
             let tmp = String::from_utf8(request.message.payload.clone()).unwrap();
             let regexg = Regex::new(regex_pattern_get).unwrap();
@@ -75,8 +83,10 @@ async fn main() {
             {
                 // partialeq not impl
                 println!("String matches the POST/PUT pattern");
-            } else if regexg.is_match(&tmp[..]) && request.get_method() == &Method::Get {
-                println!("String matches the GET pattern");
+            } else if regexg.is_match(&tmp[..])
+                && (request.get_method() == &Method::Get || request.get_method() == &Method::Delete)
+            {
+                println!("String matches the GET/DELETE pattern");
             } else {
                 println!("String does not match a valid pattern");
                 return match request.response {
@@ -93,8 +103,13 @@ async fn main() {
             let data: Vec<String> = tmp.rsplitn(2, '/').map(String::from).collect();
             let msg: CoapMessage = CoapMessage {
                 data: util::parse_data(&data[0]),
-                ipv4: request.source.expect("Invalid address").to_string(),
-                unix: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                ipv4: metadata.then(|| request.source.expect("Invalid address").to_string()),
+                unix: metadata.then(|| {
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs()
+                }),
             };
 
             if request.get_method() == &Method::Put {
@@ -103,6 +118,9 @@ async fn main() {
             } else if request.get_method() == &Method::Post {
                 // creates a random ID in firebase, not useful
                 firebase.at(&data[1]).set(&msg).await;
+            } else if request.get_method() == &Method::Delete {
+                // creates a random ID in firebase, not useful
+                firebase.at(&data[1]).delete().await;
             } else if request.get_method() == &Method::Get {
                 let result = firebase.at(&data[1]).get_as_string().await;
                 match result {
@@ -123,7 +141,9 @@ async fn main() {
                                             payload.push_str(value);
                                             payload.push(',');
                                         }
+
                                         message.message.payload = payload.as_bytes().to_vec();
+                                        println!("Sent reply with payload: {}", payload);
                                         message.message.header.code =
                                             MessageClass::Response(coap_lite::ResponseType::Valid);
                                         Some(message)

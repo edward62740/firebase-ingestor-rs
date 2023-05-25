@@ -1,8 +1,7 @@
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use std::net::{Ipv4Addr};
 
-pub fn register(ip: Ipv4Addr, port: u16, serv_type: String, serv_name: String) {
-    let mdns = ServiceDaemon::new().expect("Could not create service daemon");
+pub fn register(sd: &ServiceDaemon, ip: Ipv4Addr, port: u16, serv_type: String, serv_name: String) {
 
     let service_hostname = "firebase-ingestor.local";
 
@@ -22,9 +21,9 @@ pub fn register(ip: Ipv4Addr, port: u16, serv_type: String, serv_name: String) {
     .expect("valid service info")
     .enable_addr_auto();
 
-    let monitor = mdns.monitor().expect("Failed to monitor the daemon");
+    let monitor = sd.monitor().expect("Failed to monitor the daemon");
 
-    mdns.register(service_info)
+    sd.register(service_info)
         .expect("Failed to register mDNS service");
 
     println!("Registered service {}.{}", &serv_name, &serv_type);
