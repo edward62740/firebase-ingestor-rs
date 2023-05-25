@@ -16,3 +16,8 @@ pub fn parse_data(input: &str) -> HashMap<String, String> {
         })
         .collect()
 }
+
+
+pub fn print_usage() {
+    println!("Invalid arguments")
+}
