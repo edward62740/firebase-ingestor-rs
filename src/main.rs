@@ -42,11 +42,20 @@ async fn main() {
     let args: Vec<String> = env::args().collect();
 
     let mut metadata: bool = true;
+    let mut structure: bool = true;
     for arg in args.iter() {
         match arg.as_str() {
             "--no_metadata" => {
                 println!("Metadata disabled");
                 metadata = false},
+            _ => {}
+        }
+    }
+    for arg in args.iter() {
+        match arg.as_str() {
+            "--no_struct" => {
+                println!("Structure disabled");
+                structure = false},
             _ => {}
         }
     }
@@ -101,6 +110,7 @@ async fn main() {
             }
 
             let data: Vec<String> = tmp.rsplitn(2, '/').map(String::from).collect();
+
             let msg: CoapMessage = CoapMessage {
                 data: util::parse_data(&data[0]),
                 ipv4: metadata.then(|| request.source.expect("Invalid address").to_string()),
@@ -114,10 +124,12 @@ async fn main() {
 
             if request.get_method() == &Method::Put {
                 // == PATCH
-                firebase.at(&data[1]).update(&msg).await;
+                if structure { firebase.at(&data[1]).update(&msg).await; }
+                else { firebase.at(&data[1]).update(&util::parse_data(&data[0])).await; }
             } else if request.get_method() == &Method::Post {
                 // creates a random ID in firebase, not useful
-                firebase.at(&data[1]).set(&msg).await;
+                if structure { firebase.at(&data[1]).set(&msg).await; }
+                else { firebase.at(&data[1]).set(&util::parse_data(&data[0])).await; }
             } else if request.get_method() == &Method::Delete {
                 // creates a random ID in firebase, not useful
                 firebase.at(&data[1]).delete().await;
