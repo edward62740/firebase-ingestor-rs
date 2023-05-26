@@ -135,15 +135,15 @@ async fn main() {
                 firebase.at(&data[1]).delete().await;
             } else if request.get_method() == &Method::Get {
                 let result = firebase.at(&data[1]).get_as_string().await;
+            
                 match result {
                     Ok(response) => {
                         let res: Result<CoapMessage, serde_json::Error> =
                             serde_json::from_str(response.data.as_str());
-
+            
                         match res {
                             Ok(coap_message) => {
-                                // Handle successful deserialization
-                                println!("Deserialization successful: {:?}", coap_message);
+                                println!("Deserialization successful as CoapMessage: {:?}", coap_message);
                                 return match request.response {
                                     Some(mut message) => {
                                         let mut payload = String::new();
@@ -153,7 +153,7 @@ async fn main() {
                                             payload.push_str(value);
                                             payload.push(',');
                                         }
-
+            
                                         message.message.payload = payload.as_bytes().to_vec();
                                         println!("Sent reply with payload: {}", payload);
                                         message.message.header.code =
@@ -163,14 +163,42 @@ async fn main() {
                                     _ => None,
                                 };
                             }
-                            Err(err) => {
-                                // Handle deserialization error
-                                println!("Deserialization error: {:?}", err);
+                            Err(_) => {
+                                // Try deserializing as HashMap
+                                let hashmap_result: Result<HashMap<String, String>, _> = serde_json::from_str(response.data.as_str());
+                                match hashmap_result {
+                                    Ok(hashmap_data) => {
+                                        println!("Deserialization successful as HashMap: {:?}", hashmap_data);
+                                        return match request.response {
+                                            Some(mut message) => {
+                                                let mut payload = String::new();
+                                                for (key, value) in hashmap_data.iter() {
+                                                    payload.push_str(key);
+                                                    payload.push(':');
+                                                    payload.push_str(value);
+                                                    payload.push(',');
+                                                }
+                    
+                                                message.message.payload = payload.as_bytes().to_vec();
+                                                println!("Sent reply with payload: {}", payload);
+                                                message.message.header.code =
+                                                    MessageClass::Response(coap_lite::ResponseType::Valid);
+                                                Some(message)
+                                            }
+                                            _ => None,
+                                        };
+                                    }
+                                    Err(err) => {
+                                        // Handle deserialization error
+                                        println!("Deserialization error: {:?}", err);
+                                    }
+                                }
                             }
                         }
                     }
                     Err(err) => println!("Error: {}", err),
                 }
+            
             }
 
             return match request.response {
