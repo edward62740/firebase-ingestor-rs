@@ -9,7 +9,7 @@ edition = "2021"
 env_logger = "0.10.0"
 firebase-rs = "2.0.6"
 mdns-sd = "0.7.3"
-serde = "1.0.163"
+serde = "1.0.180"
 coap = "0.12"
 coap-lite = "0.9.1"
 tokio = { version = "1", features = ["full"] }
